@@ -6,7 +6,7 @@ import { InfoSheet } from './components/InfoSheet';
 import { KitBuilder } from './components/KitBuilder';
 import { MenuView } from './components/MenuView';
 import { PixPayment } from './components/PixPayment';
-import { isDemo } from './lib/api';
+import { fetchOrderStatus, isDemo } from './lib/api';
 import { KEYS, load, remove, save } from './lib/storage';
 import { whatsappLink } from './lib/whatsapp';
 import { useCart } from './state/cart';
@@ -14,6 +14,8 @@ import { useMenu } from './useMenu';
 import { useNav } from './useNav';
 
 const PENDING_TTL_MS = 36 * 60 * 60 * 1000;
+/** Status inicial gravado na planilha (igual a STATUS_LIST[0] em apps-script/Code.gs). */
+const AWAITING = 'Aguardando comprovante';
 /** Número da loja usado só se o cardápio não carregar (vem do folder). */
 const FALLBACK_WHATSAPP = '5521979183105';
 
@@ -40,6 +42,24 @@ export default function App() {
   useEffect(() => {
     document.body.style.overflow = view.name === 'menu' ? '' : 'hidden';
   }, [view.name]);
+
+  // O aviso "aguardando comprovante" só vale enquanto o pedido existe e está em aberto na planilha.
+  // Se foi apagado, cancelado, pago ou entregue, o aviso some. Sem internet, o aviso permanece.
+  const pendingId = pending?.result.id;
+  const pendingDelivery = pending?.result.entregaISO;
+  useEffect(() => {
+    if (!pendingId || !pendingDelivery) return;
+    let alive = true;
+    fetchOrderStatus(pendingId, pendingDelivery).then((status) => {
+      if (alive && status !== null && status !== AWAITING) {
+        remove(KEYS.pending);
+        setPending(null);
+      }
+    });
+    return () => {
+      alive = false;
+    };
+  }, [pendingId, pendingDelivery]);
 
   // Telas que dependem de dados: se faltarem (ex.: página recarregada), volta ao cardápio.
   useEffect(() => {

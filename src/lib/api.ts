@@ -34,6 +34,21 @@ export async function fetchMenu(): Promise<Menu> {
   return data.menu;
 }
 
+/**
+ * Situação do pedido na planilha ("Aguardando comprovante", "Pago", "Cancelado",
+ * "nao_encontrado"...). Devolve null se não deu para consultar (sem internet etc.).
+ */
+export async function fetchOrderStatus(id: string, entregaISO: string): Promise<string | null> {
+  if (isDemo) return null;
+  try {
+    const q = `action=status&id=${encodeURIComponent(id)}&entrega=${encodeURIComponent(entregaISO)}`;
+    const data = await call<{ ok: boolean; status?: string }>(`${API_URL}?${q}`);
+    return data.ok && data.status ? data.status : null;
+  } catch {
+    return null;
+  }
+}
+
 export class OrderError extends Error {}
 
 export async function submitOrder(menu: Menu, req: OrderRequest): Promise<OrderResult> {

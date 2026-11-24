@@ -40,7 +40,31 @@ function doGet(e) {
       return json_({ ok: false, error: 'Cardápio indisponível.' });
     }
   }
+  if (action === 'status') {
+    var status = getOrderStatus_(e.parameter.id, e.parameter.entrega);
+    return status === null ? json_({ ok: false, error: 'Consulta inválida.' }) : json_({ ok: true, status: status });
+  }
   return json_({ ok: false, error: 'Ação inválida.' });
+}
+
+/**
+ * Situação de um pedido, para o site saber se ainda deve cobrar o comprovante.
+ * Devolve apenas o status (nunca dados do cliente). O código do pedido é aleatório.
+ * Retorna null se os parâmetros forem inválidos e 'nao_encontrado' se não existir na planilha.
+ */
+function getOrderStatus_(id, entregaISO) {
+  id = str_(id);
+  entregaISO = str_(entregaISO);
+  if (!/^SC[-A-Z0-9]{4,20}$/.test(id) || !/^\d{4}-\d{2}-\d{2}$/.test(entregaISO)) return null;
+  var sh = SpreadsheetApp.getActive().getSheetByName(WEEK_PREFIX + entregaISO);
+  if (!sh) return 'nao_encontrado';
+  var ids = sh.getRange(1, COL.id, sh.getMaxRows(), 1).getValues();
+  for (var i = 1; i < ids.length; i++) {
+    if (String(ids[i][0]) === id) {
+      return str_(sh.getRange(i + 1, COL.status, 1, 1).getValues()[0][0]) || 'nao_encontrado';
+    }
+  }
+  return 'nao_encontrado';
 }
 
 function doPost(e) {

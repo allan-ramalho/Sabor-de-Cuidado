@@ -73,6 +73,10 @@ function loadBackend(opts: { today?: string; tables?: Record<string, unknown[][]
   const tables = opts.tables ?? {};
   const sandbox: any = {
     console,
+    ContentService: {
+      MimeType: { JSON: 'json' },
+      createTextOutput: (text: string) => ({ getContent: () => text, setMimeType() { return this; } }),
+    },
     Utilities: { formatDate: () => opts.today ?? '2025-06-04' },
     CacheService: {
       getScriptCache: () => ({
@@ -314,6 +318,29 @@ describe('Code.gs: gravação do pedido', () => {
     expect(falha(base({ requestId: 'x' }))).toBeTruthy();
     expect(falha(base({ modo: 'drone' }))).toBeTruthy();
     expect(falha(base({ endereco: { rua: '', bairro: '' } }))).toMatch(/rua/i);
+  });
+
+  it('consulta a situação do pedido, sem expor dados do cliente', () => {
+    const { gs, weekSheets } = loadBackend({ tables });
+    const { id, entregaISO } = roundtrip(gs.createOrder_(base()));
+    const consulta = (i: string, d: string) =>
+      JSON.parse(gs.doGet({ parameter: { action: 'status', id: i, entrega: d } }).getContent());
+
+    expect(consulta(id, entregaISO)).toEqual({ ok: true, status: 'Aguardando comprovante' });
+    expect(consulta('SC-ZZZZZZ', entregaISO)).toEqual({ ok: true, status: 'nao_encontrado' });
+    expect(consulta(id, '2030-01-01')).toEqual({ ok: true, status: 'nao_encontrado' }); // aba inexistente
+    expect(consulta('x; DROP', entregaISO).ok).toBe(false);
+    expect(consulta(id, 'ontem').ok).toBe(false);
+
+    // quando a dona marca como Pago ou apaga a linha, a consulta reflete
+    const sheet = weekSheets.get(`Entrega ${entregaISO}`)!;
+    sheet.cells.set('2,9', 'Pago');
+    expect(consulta(id, entregaISO).status).toBe('Pago');
+    sheet.cells.delete('2,1');
+    expect(consulta(id, entregaISO).status).toBe('nao_encontrado');
+
+    const bruto = gs.doGet({ parameter: { action: 'status', id, entrega: entregaISO } }).getContent();
+    expect(bruto).not.toMatch(/Maria|21999998888|Rua A/);
   });
 
   it('limita 5 pedidos por telefone em 10 minutos', () => {
