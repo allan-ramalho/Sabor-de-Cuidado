@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" role="img" aria-label="Sabor de Cuidado">
+  <rect width="200" height="200" fill="#fcf7ef"/>
+  <path fill="#b04a1b" d="M100 66C76 51 72 31 86 27c7-2 14 2 14 9 0-7 7-11 14-9 14 4 10 24-14 39z"/>
+  <rect x="86" y="68" width="28" height="9" rx="4.5" fill="#1f4030"/>
+  <path fill="none" stroke="#1f4030" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"
+        d="M44 82h112M30 104h16M154 104h16M54 82v38a32 32 0 0 0 32 32h28a32 32 0 0 0 32-32V82"/>
+</svg>
