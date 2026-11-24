@@ -29,6 +29,8 @@ jobs:
         env:
           # URL do Web App do Apps Script, cadastrada em Settings > Secrets and variables > Actions > Variables
           VITE_API_URL: ${{ vars.API_URL }}
+          # Opcional: chave PÚBLICA do Cloudflare Turnstile (anti-robô). Vazia = verificação desligada.
+          VITE_TURNSTILE_SITE_KEY: ${{ vars.TURNSTILE_SITE_KEY }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

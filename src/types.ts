@@ -83,6 +83,12 @@ export interface OrderRequest {
   linhas: OrderLine[];
   /** Campo isca contra robôs; deve ir vazio. */
   website: string;
+  /** Tempo, em ms, entre abrir o checkout e enviar. Robôs enviam na hora. */
+  tempoMs: number;
+  /** De onde veio a visita (instagram, whatsapp, google, direto...). */
+  origem: string;
+  /** Token do Cloudflare Turnstile, quando a verificação está ligada. */
+  captcha?: string;
 }
 
 export interface OrderResult {

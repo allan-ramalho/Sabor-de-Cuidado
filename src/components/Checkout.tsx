@@ -7,6 +7,8 @@ import { buildPix } from '../lib/pix';
 import { PricingError, priceOrder } from '../lib/pricing';
 import { KEYS, load, save } from '../lib/storage';
 import { buildWhatsappMessage } from '../lib/whatsapp';
+import { getOrigem } from '../lib/analytics';
+import { Turnstile, TURNSTILE_SITE_KEY } from './Turnstile';
 
 interface Props {
   menu: Menu;
@@ -56,7 +58,14 @@ export function Checkout({ menu, lines, onBack, onDone }: Props) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const requestId = useRef(newRequestId());
+  const openedAt = useRef(Date.now());
   const cycle = useMemo(() => currentCycle(), []);
+
+  // Verificação anti-robô (Cloudflare Turnstile): só existe se a chave pública estiver configurada.
+  const captchaOn = TURNSTILE_SITE_KEY !== '';
+  const [captcha, setCaptcha] = useState<string | null>(null);
+  const [captchaReset, setCaptchaReset] = useState(0);
+  const [captchaFailed, setCaptchaFailed] = useState(false);
 
   const summary = useMemo(() => {
     try {
@@ -79,6 +88,13 @@ export function Checkout({ menu, lines, onBack, onDone }: Props) {
     if (modo === 'entrega' && (rua.trim().length < 3 || bairro.trim().length < 2)) {
       return setError('Informe rua e número e o bairro para a entrega.');
     }
+    if (captchaOn && !captcha) {
+      return setError(
+        captchaFailed
+          ? 'Não foi possível carregar a verificação de segurança. Desative bloqueadores de anúncio ou faça o pedido pelo WhatsApp.'
+          : 'Aguarde a verificação de segurança e toque de novo.',
+      );
+    }
 
     setBusy(true);
     try {
@@ -92,6 +108,9 @@ export function Checkout({ menu, lines, onBack, onDone }: Props) {
         obs: obs.trim(),
         linhas: lines,
         website,
+        tempoMs: Date.now() - openedAt.current,
+        origem: getOrigem(),
+        captcha: captcha ?? undefined,
       });
       save(KEYS.customer, { nome: nome.trim(), whatsapp, modo, rua, bairro, complemento, cep } satisfies Saved);
       const pixCode = buildPix({
@@ -110,6 +129,11 @@ export function Checkout({ menu, lines, onBack, onDone }: Props) {
         criadoEm: Date.now(),
       });
     } catch (err) {
+      // O token do Turnstile vale uma vez: em qualquer falha, pede um novo.
+      if (captchaOn) {
+        setCaptcha(null);
+        setCaptchaReset((n) => n + 1);
+      }
       if (err instanceof OrderError || err instanceof PricingError) {
         // Recusa definitiva do servidor: um novo envio precisa de novo identificador.
         requestId.current = newRequestId();
@@ -239,6 +263,17 @@ export function Checkout({ menu, lines, onBack, onDone }: Props) {
               <p className="notice warn">Sua sacola tem itens indisponíveis. Volte e revise.</p>
             )}
           </section>
+
+          {captchaOn && (
+            <Turnstile
+              onToken={(t) => {
+                setCaptcha(t);
+                if (t) setCaptchaFailed(false);
+              }}
+              onError={() => setCaptchaFailed(true)}
+              resetSignal={captchaReset}
+            />
+          )}
 
           {!pixReady && <p className="notice warn">O Pix da loja ainda não foi configurado. Fale conosco pelo WhatsApp.</p>}
           {error && (

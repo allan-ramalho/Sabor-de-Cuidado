@@ -5,6 +5,7 @@ import { crc16, buildPix } from './pix';
 import { addDays, deliveryDateFor, toISO, cutoffDateFor } from './cycle';
 import { kitProblem, priceLine, priceOrder, PricingError } from './pricing';
 import { buildWhatsappMessage, whatsappLink } from './whatsapp';
+import { origemDeReferrer } from './analytics';
 import type { OrderLine } from '../types';
 
 describe('brl', () => {
@@ -70,6 +71,22 @@ describe('mensagem do WhatsApp', () => {
     const link = whatsappLink('5521979183105', msg);
     expect(link.startsWith('https://wa.me/5521979183105?text=')).toBe(true);
     expect(decodeURIComponent(link.split('text=')[1])).toBe(msg);
+  });
+});
+
+describe('origem das visitas', () => {
+  const host = 'allan-ramalho.github.io';
+  it('reconhece as origens mais comuns', () => {
+    expect(origemDeReferrer('', host)).toBe('direto');
+    expect(origemDeReferrer('https://l.instagram.com/?u=x', host)).toBe('instagram');
+    expect(origemDeReferrer('https://m.facebook.com/', host)).toBe('facebook');
+    expect(origemDeReferrer('https://api.whatsapp.com/send', host)).toBe('whatsapp');
+    expect(origemDeReferrer('https://www.google.com.br/search?q=marmita', host)).toBe('google');
+    expect(origemDeReferrer('https://www.blogdaana.com.br/post', host)).toBe('blogdaana.com.br');
+  });
+  it('navegação interna e lixo viram "direto"', () => {
+    expect(origemDeReferrer(`https://${host}/Sabor-de-Cuidado/`, host)).toBe('direto');
+    expect(origemDeReferrer('isso nao e url', host)).toBe('direto');
   });
 });
 

@@ -20,6 +20,14 @@ var MAX_LINES = 30;
 var MENU_CACHE_SECONDS = 60;
 var RATE_LIMIT_ORDERS = 5; // pedidos por telefone...
 var RATE_LIMIT_SECONDS = 600; // ...a cada 10 minutos
+var GLOBAL_LIMIT_10MIN = 20; // teto de pedidos da loja inteira em 10 minutos (normal: poucos por dia)
+var GLOBAL_LIMIT_HOUR = 60; // e em 1 hora
+var MIN_FILL_MS = 1500; // tempo mínimo entre abrir o checkout e enviar (robôs enviam na hora)
+
+var TAB_PROD = 'Produção';
+var TAB_STATS = 'Estatísticas';
+var TAB_STATS_DATA = 'Visitas (dados)';
+var STAT_EVENTS = ['visita', 'sacola', 'checkout', 'pedido'];
 
 var ORDER_HEADERS = [
   'Pedido', 'Data/hora', 'Cliente', 'WhatsApp', 'Tipo', 'Endereço', 'Itens',
@@ -72,6 +80,10 @@ function doPost(e) {
     var raw = (e && e.postData && e.postData.contents) || '';
     if (raw.length > 20000) throw { user: 'Pedido grande demais.' };
     var body = JSON.parse(raw);
+    if (body.action === 'evento') {
+      registrarEvento_(str_(body.evento), str_(body.origem));
+      return json_({ ok: true });
+    }
     if (body.action !== 'order') throw { user: 'Ação inválida.' };
     return json_({ ok: true, pedido: createOrder_(body) });
   } catch (err) {
@@ -377,6 +389,16 @@ function createOrder_(body) {
   var requestId = str_(body.requestId);
   if (!/^[A-Za-z0-9_-]{8,64}$/.test(requestId)) throw userError_('Pedido inválido.');
 
+  // Reenvio do mesmo pedido (resposta perdida): devolve o que já foi gravado, sem nova verificação.
+  var earlier = CacheService.getScriptCache().get('req_' + requestId);
+  if (earlier) return JSON.parse(earlier);
+
+  // Filtros anti-robô: tempo mínimo de preenchimento e (se configurado) Cloudflare Turnstile.
+  if (typeof body.tempoMs !== 'number' || body.tempoMs < MIN_FILL_MS) throw userError_('Envio rápido demais. Tente de novo.');
+  if (!verifyCaptcha_(body.captcha)) {
+    throw userError_('Não conseguimos confirmar a verificação de segurança. Recarregue a página e tente de novo.');
+  }
+
   var nome = clip_(body.nome, 80);
   if (nome.length < 2) throw userError_('Informe seu nome.');
   var phone = str_(body.whatsapp).replace(/\D/g, '');
@@ -402,6 +424,8 @@ function createOrder_(body) {
 
   var priced = priceOrder_(menu, body.linhas, modo);
   var obs = clip_(body.obs, 300);
+  var result = null;
+  var gid = 0;
 
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(20000)) throw userError_('Estamos com muitos pedidos agora. Tente novamente em instantes.');
@@ -412,9 +436,19 @@ function createOrder_(body) {
     var done = cache.get('req_' + requestId);
     if (done) return JSON.parse(done);
 
-    var rlKey = 'rl_' + phone;
+    // Limites por janela fixa: por telefone e para a loja inteira (trava de segurança contra spam).
+    var bucket10 = Math.floor(Date.now() / 600000);
+    var bucketHour = Math.floor(Date.now() / 3600000);
+    var rlKey = 'rl_' + phone + '_' + bucket10;
+    var g10Key = 'g10_' + bucket10;
+    var gHourKey = 'gh_' + bucketHour;
     var count = parseInt(cache.get(rlKey) || '0', 10);
+    var g10 = parseInt(cache.get(g10Key) || '0', 10);
+    var gHour = parseInt(cache.get(gHourKey) || '0', 10);
     if (count >= RATE_LIMIT_ORDERS) throw userError_('Muitos pedidos em pouco tempo. Aguarde alguns minutos.');
+    if (g10 >= GLOBAL_LIMIT_10MIN || gHour >= GLOBAL_LIMIT_HOUR) {
+      throw userError_('Estamos com muitos pedidos agora. Tente novamente em alguns minutos.');
+    }
 
     var entregaISO = deliveryDate_(todayISO_());
     var sheet = getOrCreateWeekSheet_(entregaISO);
@@ -437,10 +471,13 @@ function createOrder_(body) {
       STATUS_LIST[0],
       obs,
       '',
-      JSON.stringify({ requestId: requestId, modo: modo, linhas: body.linhas, totalCent: priced.totalCent })
+      JSON.stringify({
+        requestId: requestId, modo: modo, linhas: body.linhas, totalCent: priced.totalCent,
+        itens: flattenItems_(menu, body.linhas) // base da aba Produção
+      })
     ]]);
 
-    var result = {
+    result = {
       id: id,
       totalCent: priced.totalCent,
       subtotalCent: priced.subtotalCent,
@@ -449,10 +486,108 @@ function createOrder_(body) {
     };
     cache.put('req_' + requestId, JSON.stringify(result), 21600);
     cache.put(rlKey, String(count + 1), RATE_LIMIT_SECONDS);
-    return result;
+    cache.put(g10Key, String(g10 + 1), 660);
+    cache.put(gHourKey, String(gHour + 1), 3700);
+    gid = sheet.getSheetId();
   } finally {
     lock.releaseLock();
   }
+
+  // Efeitos secundários fora do lock. Se falharem, o pedido já está gravado e não é perdido.
+  try { notifyOwner_(result, nome, phone, modo, endereco, obs, priced, gid); } catch (e) { console.error(e); }
+  try { atualizarProducao(); } catch (e) { console.error(e); }
+  try { registrarEvento_('pedido', clip_(body.origem, 30)); } catch (e) { console.error(e); }
+  return result;
+}
+
+/** Linhas simples (prato/sobremesa, nome, quantidade) para somar na aba Produção. */
+function flattenItems_(menu, linhas) {
+  var out = [];
+  linhas.forEach(function (l) {
+    if (l.tipo === 'kit') {
+      menu.pratos.forEach(function (d) {
+        var q = l.pratos[d.id] || 0;
+        if (q > 0) out.push({ tipo: 'prato', nome: d.nome, qtd: q });
+      });
+      var kit = findBy_(menu.kits, l.kitId);
+      var s = l.sobremesaId ? findBy_(menu.sobremesas, l.sobremesaId) : null;
+      if (kit && kit.sobremesasGratis > 0 && s) out.push({ tipo: 'sobremesa', nome: s.nome, qtd: 1 });
+    } else if (l.tipo === 'prato') {
+      out.push({ tipo: 'prato', nome: findBy_(menu.pratos, l.pratoId).nome, qtd: l.qtd });
+    } else if (l.tipo === 'sobremesa') {
+      out.push({ tipo: 'sobremesa', nome: findBy_(menu.sobremesas, l.sobremesaId).nome, qtd: l.qtd });
+    }
+  });
+  return out;
+}
+
+/**
+ * Verificação anti-robô (Cloudflare Turnstile). Só é exigida se a Propriedade do script
+ * TURNSTILE_SECRET estiver preenchida; sem ela, retorna true (ver docs/CONFIGURAR.md).
+ * Se a Cloudflare estiver fora do ar, não bloqueia os clientes.
+ */
+function verifyCaptcha_(token) {
+  var secret = PropertiesService.getScriptProperties().getProperty('TURNSTILE_SECRET');
+  if (!secret) return true;
+  if (!token || String(token).length > 4096) return false;
+  try {
+    var res = UrlFetchApp.fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+      method: 'post',
+      payload: { secret: secret, response: String(token) },
+      muteHttpExceptions: true
+    });
+    return JSON.parse(res.getContentText()).success === true;
+  } catch (err) {
+    console.error(err);
+    return true;
+  }
+}
+
+/* ========================== Aviso por e-mail ========================== */
+
+function dateLabel_(iso) {
+  var p = iso.split('-');
+  var d = new Date(Date.UTC(+p[0], +p[1] - 1, +p[2]));
+  var dias = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
+  return dias[d.getUTCDay()] + ', ' + p[2] + '/' + p[1];
+}
+
+function formatPhone_(d) {
+  return d.length === 11 ? '(' + d.slice(0, 2) + ') ' + d.slice(2, 7) + '-' + d.slice(7) : '(' + d.slice(0, 2) + ') ' + d.slice(2, 6) + '-' + d.slice(6);
+}
+
+/** Destinatários: coluna Valor de email_pedidos na aba Config (vários separados por vírgula); senão, o dono da planilha. */
+function ownerEmails_() {
+  var raw = str_(readConfig_().email_pedidos);
+  var list = raw.split(/[,;\s]+/).filter(function (m) { return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(m); }).slice(0, 5);
+  if (list.length === 0) {
+    var self = Session.getEffectiveUser().getEmail();
+    if (self) list = [self];
+  }
+  return list;
+}
+
+function notifyOwner_(result, nome, phone, modo, endereco, obs, priced, sheetGid) {
+  var to = ownerEmails_();
+  if (to.length === 0) return;
+  var lines = [
+    'Novo pedido ' + result.id + ' - ' + brl_(result.totalCent),
+    '',
+    'Cliente: ' + nome,
+    'WhatsApp: ' + formatPhone_(phone) + '  https://wa.me/55' + phone,
+    (modo === 'entrega' ? 'Entrega' : 'Retirada') + ' em ' + dateLabel_(result.entregaISO),
+  ];
+  if (endereco) lines.push('Endereço: ' + endereco);
+  lines.push('', 'Itens:', itemsText_(priced), '', 'Total: ' + brl_(result.totalCent));
+  if (obs) lines.push('Observações do cliente: ' + obs);
+  lines.push('', 'Status: aguardando comprovante do Pix.',
+    'Planilha: ' + SpreadsheetApp.getActive().getUrl() + '#gid=' + sheetGid);
+  MailApp.sendEmail({
+    to: to.join(','),
+    subject: 'Novo pedido ' + result.id + ' - ' + brl_(result.totalCent) + ' - ' + dateLabel_(result.entregaISO),
+    body: lines.join('\n'),
+    name: 'Sabor de Cuidado'
+  });
 }
 
 /* ========================== Abas semanais ========================== */
@@ -544,6 +679,176 @@ function newOrderId_(existing) {
  */
 function limparCacheDoCardapio() {
   CacheService.getScriptCache().remove('menu');
+  // Mudou status, cancelou um pedido ou trocou a data na aba Produção: recalcula a contagem.
+  try { atualizarProducao(); } catch (e) { console.error(e); }
+}
+
+/* ========================== Aba Produção ========================== */
+
+function getOrCreateProducaoSheet_(ss) {
+  var sh = ss.getSheetByName(TAB_PROD);
+  if (sh) return sh;
+  sh = ss.insertSheet(TAB_PROD, Math.min(1, ss.getSheets().length));
+  sh.getRange('A1').setValue('Entrega (AAAA-MM-DD)').setFontWeight('bold');
+  sh.getRange('B1').setNumberFormat('@').setValue(deliveryDate_(todayISO_()))
+    .setBackground('#fff2cc').setFontWeight('bold')
+    .setNote('Troque a data (AAAA-MM-DD) para ver a produção de outra semana. Use o nome da aba "Entrega ..." sem a palavra Entrega.');
+  sh.getRange('A2').setValue('Pedidos').setFontWeight('bold');
+  sh.setColumnWidth(1, 300); sh.setColumnWidth(2, 130); sh.setColumnWidth(3, 130); sh.setColumnWidth(4, 130);
+  return sh;
+}
+
+/**
+ * Soma as marmitas e sobremesas da semana escolhida em B1 (padrão: o ciclo atual).
+ * Ignora pedidos cancelados. "Pagos" = Pago + Entregue; "Aguardando" = ainda sem comprovante.
+ * Roda sozinha a cada pedido e a cada alteração na planilha.
+ */
+function atualizarProducao() {
+  var ss = SpreadsheetApp.getActive();
+  var sh = getOrCreateProducaoSheet_(ss);
+
+  var raw = sh.getRange('B1').getValue();
+  var entrega = raw instanceof Date ? Utilities.formatDate(raw, TZ, 'yyyy-MM-dd') : str_(raw);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(entrega)) {
+    entrega = deliveryDate_(todayISO_());
+    sh.getRange('B1').setValue(entrega);
+  }
+
+  var agg = { prato: {}, sobremesa: {} };
+  var pedidos = { pagos: 0, aguardando: 0 };
+  var week = ss.getSheetByName(WEEK_PREFIX + entrega);
+  var last = week ? readOrderIds_(week).lastRow : 1;
+  if (week && last >= 2) {
+    week.getRange(2, 1, last - 1, ORDER_HEADERS.length).getValues().forEach(function (r) {
+      if (r[COL.id - 1] === '') return;
+      var status = str_(r[COL.status - 1]);
+      if (status === 'Cancelado') return;
+      var pago = status === 'Pago' || status === 'Entregue';
+      if (pago) pedidos.pagos++; else pedidos.aguardando++;
+      var itens = [];
+      try { itens = JSON.parse(str_(r[COL.json - 1])).itens || []; } catch (e) { itens = []; }
+      itens.forEach(function (it) {
+        var bucket = agg[it.tipo];
+        if (!bucket) return;
+        var cell = bucket[it.nome] || (bucket[it.nome] = { pago: 0, aberto: 0 });
+        if (pago) cell.pago += it.qtd; else cell.aberto += it.qtd;
+      });
+    });
+  }
+
+  // Ordem do cardápio primeiro; pratos que saíram do cardápio vão ao fim.
+  var menu = getMenu_();
+  function ordered(bucket, menuNames) {
+    var names = menuNames.filter(function (n) { return bucket[n]; });
+    Object.keys(bucket).sort().forEach(function (n) { if (names.indexOf(n) < 0) names.push(n); });
+    return names;
+  }
+
+  var rows = [];
+  var headerRows = [];
+  var totalRows = [];
+  function block(title, bucket, menuNames, totalLabel) {
+    headerRows.push(rows.length);
+    rows.push([title, 'Pagos', 'Aguardando', 'Total']);
+    var pago = 0, aberto = 0;
+    ordered(bucket, menuNames).forEach(function (n) {
+      rows.push([n, bucket[n].pago, bucket[n].aberto, bucket[n].pago + bucket[n].aberto]);
+      pago += bucket[n].pago; aberto += bucket[n].aberto;
+    });
+    totalRows.push(rows.length);
+    rows.push([totalLabel, pago, aberto, pago + aberto]);
+    rows.push(['', '', '', '']);
+  }
+  block('Marmitas por prato', agg.prato, menu.pratos.map(function (d) { return d.nome; }), 'TOTAL DE MARMITAS');
+  block('Sobremesas', agg.sobremesa, menu.sobremesas.map(function (s) { return s.nome; }), 'TOTAL DE SOBREMESAS');
+
+  sh.getRange('B2').setValue(
+    (pedidos.pagos + pedidos.aguardando) + ' pedidos (' + pedidos.pagos + ' pagos, ' + pedidos.aguardando + ' aguardando)' +
+    (week ? '' : ' - nenhuma aba para esta data')
+  );
+  sh.getRange(4, 1, Math.max(sh.getMaxRows() - 3, 1), 4).clearContent().setFontWeight('normal').setFontColor('#000000').setBackground(null);
+  sh.getRange(4, 1, rows.length, 4).setValues(rows);
+  headerRows.forEach(function (i) {
+    sh.getRange(4 + i, 1, 1, 4).setFontWeight('bold').setBackground('#1f4030').setFontColor('#ffffff');
+  });
+  totalRows.forEach(function (i) { sh.getRange(4 + i, 1, 1, 4).setFontWeight('bold').setBackground('#d9ead3'); });
+}
+
+/* ========================== Estatísticas de visitas ========================== */
+
+function lastFilledRow_(sheet, col) {
+  var values = sheet.getRange(1, col, sheet.getMaxRows(), 1).getValues();
+  for (var i = values.length - 1; i >= 1; i--) if (values[i][0] !== '') return i + 1;
+  return 1;
+}
+
+function getOrCreateStatsDataSheet_(ss) {
+  var sh = ss.getSheetByName(TAB_STATS_DATA);
+  if (sh) return sh;
+  sh = ss.insertSheet(TAB_STATS_DATA);
+  sh.getRange(1, 1, 1, 4).setValues([['Dia', 'Origem', 'Evento', 'Quantidade']]).setFontWeight('bold');
+  sh.getRange(2, 1, sh.getMaxRows() - 1, 3).setNumberFormat('@'); // dia como texto AAAA-MM-DD
+  sh.setFrozenRows(1);
+  return sh;
+}
+
+/** Aba Estatísticas: tabela dos últimos 14 dias e origem das visitas, calculadas por fórmulas. */
+function getOrCreateStatsSheet_(ss) {
+  var sh = ss.getSheetByName(TAB_STATS);
+  if (sh) return sh;
+  getOrCreateStatsDataSheet_(ss);
+  sh = ss.insertSheet(TAB_STATS);
+  var d = "'" + TAB_STATS_DATA + "'!";
+  sh.getRange(1, 1, 1, 6).setValues([['Dia', 'Visitas', 'Montaram sacola', 'Chegaram ao checkout', 'Pedidos', 'Pedidos / visitas']])
+    .setFontWeight('bold').setBackground('#1f4030').setFontColor('#ffffff');
+  var formulas = [];
+  for (var n = 0; n < 14; n++) {
+    var r = n + 2;
+    var count = function (ev) {
+      return '=SUMIFS(' + d + '$D:$D,' + d + '$A:$A,$A' + r + ',' + d + '$C:$C,"' + ev + '")';
+    };
+    formulas.push(['=TEXT(TODAY()-' + n + ',"yyyy-mm-dd")', count('visita'), count('sacola'), count('checkout'), count('pedido'),
+      '=IF(B' + r + '=0,"",E' + r + '/B' + r + ')']);
+  }
+  sh.getRange(2, 1, 14, 6).setFormulas(formulas);
+  sh.getRange(2, 6, 14, 1).setNumberFormat('0.0%');
+  sh.getRange('A17').setValue('Origem das visitas (últimos 7 dias)').setFontWeight('bold');
+  sh.getRange('A18').setFormula(
+    '=IFERROR(QUERY(' + d + 'A:D,"select B, sum(D) where C = \'visita\' and A >= \'"&TEXT(TODAY()-6,"yyyy-mm-dd")&"\' group by B order by sum(D) desc label B \'Origem\', sum(D) \'Visitas\'",1),"Sem visitas ainda")'
+  );
+  sh.getRange('H1').setValue('Visita = uma abertura do site por navegador (sem cookies e sem dados pessoais).').setFontStyle('italic');
+  [110, 90, 140, 170, 90, 130].forEach(function (w, i) { sh.setColumnWidth(i + 1, w); });
+  return sh;
+}
+
+/** Soma 1 ao contador do dia/origem/evento. Falhas são ignoradas: estatística nunca atrapalha o cliente. */
+function registrarEvento_(evento, origem) {
+  if (STAT_EVENTS.indexOf(evento) < 0) return;
+  var origin = String(origem || '').toLowerCase().replace(/[^a-z0-9.-]/g, '').slice(0, 30) || 'direto';
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) return;
+  try {
+    var ss = SpreadsheetApp.getActive();
+    getOrCreateStatsSheet_(ss);
+    var sh = getOrCreateStatsDataSheet_(ss);
+    var day = todayISO_();
+    var last = lastFilledRow_(sh, 1);
+    var start = Math.max(2, last - 299);
+    if (last >= 2) {
+      var rows = sh.getRange(start, 1, last - start + 1, 4).getValues();
+      for (var i = rows.length - 1; i >= 0; i--) {
+        if (String(rows[i][0]) === day && String(rows[i][1]) === origin && String(rows[i][2]) === evento) {
+          sh.getRange(start + i, 4, 1, 1).setValues([[Number(rows[i][3]) + 1]]);
+          return;
+        }
+      }
+    }
+    var next = last + 1;
+    if (next > sh.getMaxRows()) sh.insertRowsAfter(sh.getMaxRows(), 500);
+    sh.getRange(next, 1, 1, 4).setValues([[day, origin, evento, 1]]);
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 /** Executada toda quinta pelo gatilho: cria a aba do novo ciclo antes do primeiro pedido. */
@@ -573,7 +878,8 @@ function configurarPlanilha() {
     ['taxa_entrega', 0, 'Taxa fixa em reais somada ao Pix quando o cliente escolhe entrega. Deixe 0: o Uber é combinado direto com o cliente na hora da entrega'],
     ['retirada', 'SIM', 'SIM permite retirada; NÃO deixa só entrega'],
     ['aviso_entrega', 'A entrega é feita por Uber. O valor da corrida é combinado com você no dia da entrega.', 'Aviso mostrado ao cliente na sacola, no checkout e no Pix'],
-    ['pedidos_abertos', 'SIM', 'NÃO pausa os pedidos no site']
+    ['pedidos_abertos', 'SIM', 'NÃO pausa os pedidos no site'],
+    ['email_pedidos', '', 'E-mail(s) que recebem aviso de cada pedido novo (separe vários por vírgula). Vazio = dono da planilha']
   ]);
   var cfg = ss.getSheetByName(TAB_CONFIG);
   cfg.getRange('B2:B').setNumberFormat('@'); // chaves Pix e telefones como texto
@@ -637,6 +943,8 @@ function configurarPlanilha() {
   criarAbaDaSemana();
   instalarGatilho_();
   instalarAtualizacaoInstantanea();
+  getOrCreateStatsSheet_(ss);
+  atualizarProducao();
   CacheService.getScriptCache().remove('menu');
   SpreadsheetApp.flush();
   console.log('Planilha configurada. Preencha pix_chave na aba Config e publique o Web App.');

@@ -7,6 +7,7 @@ import { KitBuilder } from './components/KitBuilder';
 import { MenuView } from './components/MenuView';
 import { PixPayment } from './components/PixPayment';
 import { fetchOrderStatus, isDemo } from './lib/api';
+import { initAnalytics, track } from './lib/analytics';
 import { KEYS, load, remove, save } from './lib/storage';
 import { whatsappLink } from './lib/whatsapp';
 import { useCart } from './state/cart';
@@ -38,6 +39,18 @@ export default function App() {
   useEffect(() => {
     if (menu) dispatch({ type: 'prune', menu });
   }, [menu, dispatch]);
+
+  // Funil de visitas (cada etapa conta uma vez por sessão): visita > sacola > checkout > pedido.
+  useEffect(() => {
+    initAnalytics();
+    track('visita');
+  }, []);
+  useEffect(() => {
+    if (lines.length > 0) track('sacola');
+  }, [lines.length]);
+  useEffect(() => {
+    if (view.name === 'checkout') track('checkout');
+  }, [view.name]);
 
   useEffect(() => {
     document.body.style.overflow = view.name === 'menu' ? '' : 'hidden';

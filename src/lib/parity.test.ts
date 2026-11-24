@@ -26,9 +26,15 @@ class FakeSheet {
     const chain: any = new Proxy(function () {}, {
       get(_t, prop) {
         if (prop === 'getMaxRows') return () => 1000;
+        if (prop === 'getSheetId') return () => 123;
         if (prop === 'getLastRow') return () => Math.max(3, ...[...self.cells.keys()].map((k) => +k.split(',')[0]));
         if (prop === 'getRange')
-          return (r: unknown, c?: number, nr = 1, nc = 1) => (typeof r === 'number' ? self.range(r, c!, nr, nc) : chain);
+          return (r: unknown, c?: number, nr = 1, nc = 1) => {
+            if (typeof r === 'number') return self.range(r, c!, nr, nc);
+            // "B1", "N1:O3": o resumo/entrada de uma célula única precisa de valor real
+            const m = typeof r === 'string' ? /^([A-Z])(\d+)$/.exec(r) : null;
+            return m ? self.range(+m[2], m[1].charCodeAt(0) - 64, 1, 1) : chain;
+          };
         if (prop === 'insertRowsAfter') return () => chain;
         return () => chain;
       },
@@ -44,6 +50,17 @@ class FakeSheet {
         if (prop === 'setValues')
           return (vals: unknown[][]) => {
             vals.forEach((row, i) => row.forEach((v, j) => self.cells.set(`${r + i},${c + j}`, v)));
+            return rng;
+          };
+        if (prop === 'getValue' || prop === 'getDisplayValue') return () => self.value(r, c);
+        if (prop === 'setValue')
+          return (v: unknown) => {
+            self.cells.set(`${r},${c}`, v);
+            return rng;
+          };
+        if (prop === 'clearContent')
+          return () => {
+            for (let i = 0; i < nr; i++) for (let j = 0; j < nc; j++) self.cells.delete(`${r + i},${c + j}`);
             return rng;
           };
         return () => rng;
@@ -66,13 +83,21 @@ function table(rows: unknown[][]) {
   };
 }
 
-function loadBackend(opts: { today?: string; tables?: Record<string, unknown[][]> } = {}) {
+function loadBackend(opts: { today?: string; tables?: Record<string, unknown[][]>; captchaOk?: (token: string) => boolean } = {}) {
   const store = new Map<string, string>();
   const props = new Map<string, string>();
   const weekSheets = new Map<string, FakeSheet>();
+  const emails: Array<{ to: string; subject: string; body: string }> = [];
   const tables = opts.tables ?? {};
   const sandbox: any = {
     console,
+    MailApp: { sendEmail: (m: { to: string; subject: string; body: string }) => void emails.push(m) },
+    Session: { getEffectiveUser: () => ({ getEmail: () => 'dono@exemplo.com' }) },
+    UrlFetchApp: {
+      fetch: (_url: string, o: { payload: { response: string } }) => ({
+        getContentText: () => JSON.stringify({ success: (opts.captchaOk ?? (() => true))(o.payload.response) }),
+      }),
+    },
     ContentService: {
       MimeType: { JSON: 'json' },
       createTextOutput: (text: string) => ({ getContent: () => text, setMimeType() { return this; } }),
@@ -95,6 +120,8 @@ function loadBackend(opts: { today?: string; tables?: Record<string, unknown[][]
     SpreadsheetApp: {
       WrapStrategy: { WRAP: 'WRAP' },
       getActive: () => ({
+        getUrl: () => 'https://docs.google.com/spreadsheets/d/XYZ/edit',
+        getSheets: () => [...weekSheets.values()],
         getSheetByName: (name: string) => {
           if (tables[name]) return table(tables[name]);
           return weekSheets.get(name)?.asProxy() ?? null;
@@ -111,7 +138,7 @@ function loadBackend(opts: { today?: string; tables?: Record<string, unknown[][]
   };
   createContext(sandbox);
   runInContext(readFileSync(join(process.cwd(), 'apps-script', 'Code.gs'), 'utf8'), sandbox);
-  return { gs: sandbox, weekSheets, store };
+  return { gs: sandbox, weekSheets, store, props, emails };
 }
 
 const roundtrip = <T>(v: T): T => JSON.parse(JSON.stringify(v));
@@ -274,6 +301,8 @@ describe('Code.gs: gravação do pedido', () => {
     endereco: { rua: 'Rua A, 10', bairro: 'Centro', complemento: '', cep: '' },
     obs: '=HYPERLINK("http://x")',
     website: '',
+    tempoMs: 8000,
+    origem: 'instagram',
     linhas: [{ tipo: 'kit', uid: 'u', kitId: 'kit-5', pratos: { 'carne-de-panela': 3, lasanha: 2 } }],
     ...over,
   });
@@ -358,6 +387,127 @@ describe('Code.gs: gravação do pedido', () => {
 
     const bruto = gs.doGet({ parameter: { action: 'status', id, entrega: entregaISO } }).getContent();
     expect(bruto).not.toMatch(/Maria|21999998888|Rua A/);
+  });
+
+  const falhou = (fn: () => unknown) => {
+    try {
+      fn();
+    } catch (e: any) {
+      return String(e.user ?? e.message ?? e);
+    }
+    return null;
+  };
+
+  it('exige tempo mínimo de preenchimento (robôs enviam na hora)', () => {
+    const { gs } = loadBackend({ tables });
+    expect(falhou(() => gs.createOrder_(base({ tempoMs: 100 })))).toMatch(/rápido demais/);
+    expect(falhou(() => gs.createOrder_(base({ tempoMs: undefined })))).toMatch(/rápido demais/);
+    expect(falhou(() => gs.createOrder_(base({ tempoMs: 'muito' })))).toMatch(/rápido demais/);
+    expect(falhou(() => gs.createOrder_(base({ tempoMs: 2000 })))).toBeNull();
+  });
+
+  it('Turnstile: só é exigido quando o segredo está configurado', () => {
+    const { gs, props } = loadBackend({ tables, captchaOk: (t) => t === 'token-bom' });
+    expect(falhou(() => gs.createOrder_(base()))).toBeNull(); // sem segredo: não exige
+
+    props.set('TURNSTILE_SECRET', 'segredo');
+    expect(falhou(() => gs.createOrder_(base()))).toMatch(/verificação/);
+    expect(falhou(() => gs.createOrder_(base({ captcha: 'token-ruim' })))).toMatch(/verificação/);
+    expect(falhou(() => gs.createOrder_(base({ captcha: 'token-bom' })))).toBeNull();
+  });
+
+  it('reenvio do mesmo pedido não exige novo token (que só vale uma vez)', () => {
+    const { gs, props } = loadBackend({ tables, captchaOk: (t) => t === 'token-bom' });
+    props.set('TURNSTILE_SECRET', 'segredo');
+    const body = base({ captcha: 'token-bom' });
+    const a = roundtrip(gs.createOrder_(body));
+    const b = roundtrip(gs.createOrder_({ ...body, captcha: undefined, tempoMs: 0 }));
+    expect(b).toEqual(a);
+  });
+
+  it('trava de segurança: no máximo 20 pedidos da loja inteira em 10 minutos', () => {
+    const { gs } = loadBackend({ tables });
+    for (let i = 0; i < 20; i++) gs.createOrder_(base({ whatsapp: `2199999${1000 + i}` }));
+    expect(falhou(() => gs.createOrder_(base({ whatsapp: '21988887777' })))).toMatch(/muitos pedidos/i);
+  });
+
+  it('avisa a dona por e-mail a cada pedido, sem expor erro se o e-mail falhar', () => {
+    const { gs, emails } = loadBackend({ tables });
+    const r = roundtrip(gs.createOrder_(base()));
+    expect(emails).toHaveLength(1);
+    expect(emails[0].to).toBe('dono@exemplo.com'); // padrão: dono da planilha
+    expect(emails[0].subject).toContain(r.id);
+    expect(emails[0].body).toContain('Maria');
+    expect(emails[0].body).toContain('Experimente (5 marmitas)');
+    expect(emails[0].body).toContain('(21) 99999-8888');
+    expect(emails[0].body).toContain('R$ 139,90');
+
+    gs.MailApp.sendEmail = () => {
+      throw new Error('cota de e-mail esgotada');
+    };
+    expect(falhou(() => gs.createOrder_(base()))).toBeNull(); // pedido grava mesmo assim
+  });
+
+  it('usa os e-mails da aba Config (vários, só válidos)', () => {
+    const cfg = [...tables.Config, ['email_pedidos', 'adriana@exemplo.com; invalido, outra@exemplo.com', '']];
+    const { gs, emails } = loadBackend({ tables: { ...tables, Config: cfg } });
+    gs.createOrder_(base());
+    expect(emails[0].to).toBe('adriana@exemplo.com,outra@exemplo.com');
+  });
+
+  it('aba Produção soma pratos da semana, separa pagos de aguardando e ignora cancelados', () => {
+    const { gs, weekSheets } = loadBackend({ tables });
+    gs.createOrder_(base()); // kit 5: 3 carne + 2 lasanha (linha 2)
+    gs.createOrder_(base({ whatsapp: '21977776666', linhas: [{ tipo: 'prato', uid: 'x', pratoId: 'lasanha', qtd: 2 }] })); // linha 3
+    const week = weekSheets.get('Entrega 2025-06-09')!;
+    week.cells.set('2,9', 'Pago');
+    gs.atualizarProducao();
+
+    const prod = weekSheets.get('Produção')!;
+    const linha = (r: number) => [1, 2, 3, 4].map((c) => prod.value(r, c));
+    expect(prod.value(1, 2)).toBe('2025-06-09');
+    expect(prod.value(2, 2)).toBe('2 pedidos (1 pagos, 1 aguardando)');
+    expect(linha(4)).toEqual(['Marmitas por prato', 'Pagos', 'Aguardando', 'Total']);
+    expect(linha(5)).toEqual(['Carne de panela', 3, 0, 3]);
+    expect(linha(6)).toEqual(['Lasanha', 2, 2, 4]);
+    expect(linha(7)).toEqual(['TOTAL DE MARMITAS', 5, 2, 7]);
+
+    // cancelar a segunda tira os 2 da lasanha; o gatilho de alteração recalcula
+    week.cells.set('3,9', 'Cancelado');
+    gs.limparCacheDoCardapio();
+    expect(linha(6)).toEqual(['Lasanha', 2, 0, 2]);
+    expect(prod.value(2, 2)).toBe('1 pedidos (1 pagos, 0 aguardando)');
+
+    // outra data digitada em B1
+    prod.cells.set('1,2', '2030-01-07');
+    gs.atualizarProducao();
+    expect(prod.value(2, 2)).toContain('nenhuma aba para esta data');
+    expect(linha(5)).toEqual(['TOTAL DE MARMITAS', 0, 0, 0]); // semana sem pratos: só o total
+    expect(linha(6)).toEqual(['', '', '', '']);
+  });
+
+  it('conta visitas por dia, origem e evento, sem aceitar lixo', () => {
+    const { gs, weekSheets } = loadBackend({ tables });
+    const evento = (e: unknown) => gs.doPost({ postData: { contents: JSON.stringify({ action: 'evento', ...(e as object) }) } });
+    expect(JSON.parse(evento({ evento: 'visita', origem: 'Instagram' }).getContent())).toEqual({ ok: true });
+    evento({ evento: 'visita', origem: 'instagram' });
+    evento({ evento: 'sacola', origem: 'instagram' });
+    evento({ evento: 'visita', origem: '' });
+    evento({ evento: 'hackear', origem: 'x' }); // evento fora da lista: ignorado
+    evento({ evento: 'visita', origem: '<script>alert(1)</script>' });
+
+    const dados = weekSheets.get('Visitas (dados)')!;
+    const rows = [2, 3, 4, 5].map((r) => [1, 2, 3, 4].map((c) => dados.value(r, c)));
+    expect(rows[0]).toEqual(['2025-06-04', 'instagram', 'visita', 2]);
+    expect(rows[1]).toEqual(['2025-06-04', 'instagram', 'sacola', 1]);
+    expect(rows[2]).toEqual(['2025-06-04', 'direto', 'visita', 1]);
+    expect(String(rows[3][1])).toMatch(/^[a-z0-9.-]+$/); // origem sanitizada
+    expect(dados.value(6, 1)).toBe('');
+    expect(weekSheets.has('Estatísticas')).toBe(true);
+
+    // o pedido também entra no funil, com a origem enviada pelo site
+    gs.createOrder_(base());
+    expect([1, 2, 3, 4].map((c) => dados.value(6, c))).toEqual(['2025-06-04', 'instagram', 'pedido', 1]);
   });
 
   it('limita 5 pedidos por telefone em 10 minutos', () => {

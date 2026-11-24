@@ -900,6 +900,15 @@ button:disabled {
   color: #fff;
 }
 
+.turnstile {
+  display: flex;
+  justify-content: center;
+}
+
+.turnstile:not(:empty) {
+  margin: 4px 0 12px;
+}
+
 .hp {
   position: absolute;
   left: -9999px;
