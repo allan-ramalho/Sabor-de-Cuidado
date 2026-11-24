@@ -496,6 +496,7 @@ function createOrder_(body) {
   // Efeitos secundários fora do lock. Se falharem, o pedido já está gravado e não é perdido.
   try { notifyOwner_(result, nome, phone, modo, endereco, obs, priced, gid); } catch (e) { console.error(e); }
   try { atualizarProducao(); } catch (e) { console.error(e); }
+  try { atualizarResumoDaSemana_(sheet); } catch (e) { console.error(e); }
   try { registrarEvento_('pedido', clip_(body.origem, 30)); } catch (e) { console.error(e); }
   return result;
 }
@@ -629,19 +630,50 @@ function getOrCreateWeekSheet_(entregaISO) {
       .whenTextEqualTo(status).setBackground(colors[status]).setRanges([statusRange]).build();
   }));
 
-  // Resumo da semana
-  sh.getRange('N1:O3').setValues([
-    ['Pedidos', ''],
-    ['Total (sem cancelados)', ''],
-    ['Recebido (Pago + Entregue)', '']
-  ]).setFontWeight('bold');
-  sh.getRange('O1').setFormula('=COUNTA(A2:A)');
-  sh.getRange('O2').setFormula('=SUMIF(I2:I,"<>Cancelado",H2:H)');
-  sh.getRange('O3').setFormula('=SUMIF(I2:I,"Pago",H2:H)+SUMIF(I2:I,"Entregue",H2:H)');
-  sh.getRange('O2:O3').setNumberFormat('"R$" #,##0.00');
+  // Resumo da semana (valores calculados pelo script: não depende do idioma da planilha)
+  atualizarResumoDaSemana_(sh);
+  sh.getRange(1, 14, 3, 2).setFontWeight('bold');
   sh.setColumnWidth(14, 190);
   sh.setColumnWidth(15, 110);
   return sh;
+}
+
+/** Escreve o resumo (pedidos, total, recebido) nas colunas N:O da aba da semana. */
+function atualizarResumoDaSemana_(week) {
+  var info = readOrderIds_(week);
+  var count = 0, total = 0, received = 0;
+  if (info.lastRow >= 2) {
+    week.getRange(2, 1, info.lastRow - 1, ORDER_HEADERS.length).getValues().forEach(function (r) {
+      if (r[COL.id - 1] === '') return;
+      count++;
+      var status = str_(r[COL.status - 1]);
+      var value = Number(r[COL.total - 1]) || 0;
+      if (status !== 'Cancelado') total += value;
+      if (status === 'Pago' || status === 'Entregue') received += value;
+    });
+  }
+  week.getRange(1, 14, 3, 2).setValues([
+    ['Pedidos', count],
+    ['Total (sem cancelados)', Math.round(total * 100) / 100],
+    ['Recebido (Pago + Entregue)', Math.round(received * 100) / 100]
+  ]);
+  week.getRange(2, 15, 2, 1).setNumberFormat('"R$" #,##0.00');
+}
+
+function isoMinusDays_(iso, n) {
+  var p = iso.split('-');
+  var d = new Date(Date.UTC(+p[0], +p[1] - 1, +p[2]) - n * 86400000);
+  return d.getUTCFullYear() + '-' + pad2_(d.getUTCMonth() + 1) + '-' + pad2_(d.getUTCDate());
+}
+
+/** Atualiza o resumo das semanas recentes (a atual e as 3 anteriores) depois de uma alteração. */
+function atualizarResumoSemanas_() {
+  var ss = SpreadsheetApp.getActive();
+  var current = deliveryDate_(todayISO_());
+  for (var i = 0; i < 4; i++) {
+    var week = ss.getSheetByName(WEEK_PREFIX + isoMinusDays_(current, 7 * i));
+    if (week) atualizarResumoDaSemana_(week);
+  }
 }
 
 /**
@@ -679,8 +711,16 @@ function newOrderId_(existing) {
  */
 function limparCacheDoCardapio() {
   CacheService.getScriptCache().remove('menu');
-  // Mudou status, cancelou um pedido ou trocou a data na aba Produção: recalcula a contagem.
+  // Mudou status, cancelou um pedido ou trocou a data na aba Produção: recalcula os números.
   try { atualizarProducao(); } catch (e) { console.error(e); }
+  try { atualizarResumoSemanas_(); } catch (e) { console.error(e); }
+}
+
+/** Recalcula tudo de uma vez (Produção, resumo das semanas e Estatísticas). Útil para corrigir/atualizar manualmente. */
+function atualizarTudo() {
+  atualizarProducao();
+  atualizarResumoSemanas_();
+  atualizarEstatisticas_();
 }
 
 /* ========================== Aba Produção ========================== */
@@ -792,33 +832,66 @@ function getOrCreateStatsDataSheet_(ss) {
   return sh;
 }
 
-/** Aba Estatísticas: tabela dos últimos 14 dias e origem das visitas, calculadas por fórmulas. */
+/** Aba Estatísticas (só estrutura). Os números são escritos por atualizarEstatisticas_(), sem fórmulas. */
 function getOrCreateStatsSheet_(ss) {
   var sh = ss.getSheetByName(TAB_STATS);
   if (sh) return sh;
   getOrCreateStatsDataSheet_(ss);
   sh = ss.insertSheet(TAB_STATS);
-  var d = "'" + TAB_STATS_DATA + "'!";
-  sh.getRange(1, 1, 1, 6).setValues([['Dia', 'Visitas', 'Montaram sacola', 'Chegaram ao checkout', 'Pedidos', 'Pedidos / visitas']])
-    .setFontWeight('bold').setBackground('#1f4030').setFontColor('#ffffff');
-  var formulas = [];
-  for (var n = 0; n < 14; n++) {
-    var r = n + 2;
-    var count = function (ev) {
-      return '=SUMIFS(' + d + '$D:$D,' + d + '$A:$A,$A' + r + ',' + d + '$C:$C,"' + ev + '")';
-    };
-    formulas.push(['=TEXT(TODAY()-' + n + ',"yyyy-mm-dd")', count('visita'), count('sacola'), count('checkout'), count('pedido'),
-      '=IF(B' + r + '=0,"",E' + r + '/B' + r + ')']);
-  }
-  sh.getRange(2, 1, 14, 6).setFormulas(formulas);
-  sh.getRange(2, 6, 14, 1).setNumberFormat('0.0%');
-  sh.getRange('A17').setValue('Origem das visitas (últimos 7 dias)').setFontWeight('bold');
-  sh.getRange('A18').setFormula(
-    '=IFERROR(QUERY(' + d + 'A:D,"select B, sum(D) where C = \'visita\' and A >= \'"&TEXT(TODAY()-6,"yyyy-mm-dd")&"\' group by B order by sum(D) desc label B \'Origem\', sum(D) \'Visitas\'",1),"Sem visitas ainda")'
-  );
   sh.getRange('H1').setValue('Visita = uma abertura do site por navegador (sem cookies e sem dados pessoais).').setFontStyle('italic');
   [110, 90, 140, 170, 90, 130].forEach(function (w, i) { sh.setColumnWidth(i + 1, w); });
   return sh;
+}
+
+/**
+ * Recalcula a aba Estatísticas a partir de 'Visitas (dados)': últimos 14 dias e origem das visitas
+ * dos últimos 7 dias. Grava valores prontos (não fórmulas), então funciona em planilha de qualquer idioma.
+ */
+function atualizarEstatisticas_() {
+  var ss = SpreadsheetApp.getActive();
+  var sh = getOrCreateStatsSheet_(ss);
+  var data = getOrCreateStatsDataSheet_(ss);
+  var last = lastFilledRow_(data, 1);
+  var start = Math.max(2, last - 799);
+  var rows = last >= 2 ? data.getRange(start, 1, last - start + 1, 4).getValues() : [];
+
+  var today = todayISO_();
+  var days = [];
+  var perDay = {};
+  for (var n = 0; n < 14; n++) {
+    var d = isoMinusDays_(today, n);
+    days.push(d);
+    perDay[d] = { visita: 0, sacola: 0, checkout: 0, pedido: 0 };
+  }
+  var weekStart = isoMinusDays_(today, 6);
+  var origins = {};
+  rows.forEach(function (r) {
+    var day = String(r[0]);
+    var ev = String(r[2]);
+    var qty = Number(r[3]) || 0;
+    if (perDay[day] && perDay[day][ev] !== undefined) perDay[day][ev] += qty;
+    if (ev === 'visita' && day >= weekStart && day <= today) {
+      var o = String(r[1]);
+      origins[o] = (origins[o] || 0) + qty;
+    }
+  });
+
+  sh.getRange(1, 1, 1, 6).setValues([['Dia', 'Visitas', 'Montaram sacola', 'Chegaram ao checkout', 'Pedidos', 'Pedidos / visitas']])
+    .setFontWeight('bold').setBackground('#1f4030').setFontColor('#ffffff');
+  sh.getRange(2, 1, 14, 1).setNumberFormat('@'); // dia como texto, para o Sheets não converter em data
+  sh.getRange(2, 1, 14, 6).setValues(days.map(function (day) {
+    var c = perDay[day];
+    return [day, c.visita, c.sacola, c.checkout, c.pedido, c.visita > 0 ? c.pedido / c.visita : ''];
+  }));
+  sh.getRange(2, 6, 14, 1).setNumberFormat('0.0%');
+
+  sh.getRange('A17').setValue('Origem das visitas (últimos 7 dias)').setFontWeight('bold');
+  sh.getRange(18, 1, 40, 2).clearContent().setFontWeight('normal').setBackground(null).setFontColor('#000000');
+  var names = Object.keys(origins).sort(function (a, b) { return origins[b] - origins[a] || (a < b ? -1 : 1); });
+  var table = [['Origem', 'Visitas']].concat(names.slice(0, 39).map(function (o) { return [o, origins[o]]; }));
+  if (names.length === 0) table = [['Origem', 'Visitas'], ['Sem visitas ainda', '']];
+  sh.getRange(18, 1, table.length, 2).setValues(table);
+  sh.getRange(18, 1, 1, 2).setFontWeight('bold').setBackground('#d9ead3');
 }
 
 /** Soma 1 ao contador do dia/origem/evento. Falhas são ignoradas: estatística nunca atrapalha o cliente. */
@@ -834,18 +907,23 @@ function registrarEvento_(evento, origem) {
     var day = todayISO_();
     var last = lastFilledRow_(sh, 1);
     var start = Math.max(2, last - 299);
+    var found = false;
     if (last >= 2) {
       var rows = sh.getRange(start, 1, last - start + 1, 4).getValues();
       for (var i = rows.length - 1; i >= 0; i--) {
         if (String(rows[i][0]) === day && String(rows[i][1]) === origin && String(rows[i][2]) === evento) {
           sh.getRange(start + i, 4, 1, 1).setValues([[Number(rows[i][3]) + 1]]);
-          return;
+          found = true;
+          break;
         }
       }
     }
-    var next = last + 1;
-    if (next > sh.getMaxRows()) sh.insertRowsAfter(sh.getMaxRows(), 500);
-    sh.getRange(next, 1, 1, 4).setValues([[day, origin, evento, 1]]);
+    if (!found) {
+      var next = last + 1;
+      if (next > sh.getMaxRows()) sh.insertRowsAfter(sh.getMaxRows(), 500);
+      sh.getRange(next, 1, 1, 4).setValues([[day, origin, evento, 1]]);
+    }
+    atualizarEstatisticas_();
   } finally {
     lock.releaseLock();
   }

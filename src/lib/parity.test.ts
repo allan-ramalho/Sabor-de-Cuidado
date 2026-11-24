@@ -143,6 +143,16 @@ function loadBackend(opts: { today?: string; tables?: Record<string, unknown[][]
 
 const roundtrip = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 
+describe('Code.gs: independente do idioma da planilha', () => {
+  it('não usa fórmulas (setFormula/setFormulas): elas mudam de sintaxe conforme o idioma e deram erro em planilha pt-BR', () => {
+    const codigo = readFileSync(join(process.cwd(), 'apps-script', 'Code.gs'), 'utf8')
+      .split('\n')
+      .filter((l) => !l.trim().startsWith('//') && !l.trim().startsWith('*') && !l.trim().startsWith('/*'))
+      .join('\n');
+    expect(codigo).not.toMatch(/setFormula|setFormulas|setFormulaR1C1|QUERY\(|SUMIFS?\(/);
+  });
+});
+
 // ---- Testes ----
 
 describe('Code.gs: ciclo semanal igual ao do site', () => {
@@ -508,6 +518,42 @@ describe('Code.gs: gravação do pedido', () => {
     // o pedido também entra no funil, com a origem enviada pelo site
     gs.createOrder_(base());
     expect([1, 2, 3, 4].map((c) => dados.value(6, c))).toEqual(['2025-06-04', 'instagram', 'pedido', 1]);
+  });
+
+  it('aba Estatísticas traz os números prontos (sem fórmulas) e a origem dos últimos 7 dias', () => {
+    const { gs, weekSheets } = loadBackend({ tables });
+    const evento = (e: object) => gs.doPost({ postData: { contents: JSON.stringify({ action: 'evento', ...e }) } });
+    for (let i = 0; i < 3; i++) evento({ evento: 'visita', origem: 'instagram' });
+    evento({ evento: 'visita', origem: '' });
+    evento({ evento: 'sacola', origem: 'instagram' });
+    evento({ evento: 'sacola', origem: 'direto' });
+    evento({ evento: 'checkout', origem: 'instagram' });
+    gs.createOrder_(base()); // conta como "pedido" (origem instagram)
+
+    const st = weekSheets.get('Estatísticas')!;
+    const linha = (r: number, cols = 6) => Array.from({ length: cols }, (_, i) => st.value(r, i + 1));
+    expect(linha(1)).toEqual(['Dia', 'Visitas', 'Montaram sacola', 'Chegaram ao checkout', 'Pedidos', 'Pedidos / visitas']);
+    expect(linha(2)).toEqual(['2025-06-04', 4, 2, 1, 1, 0.25]);
+    expect(linha(3)).toEqual(['2025-06-03', 0, 0, 0, 0, '']);
+    expect(linha(15)[0]).toBe('2025-05-22'); // 14 dias, do mais recente ao mais antigo
+    expect(linha(18, 2)).toEqual(['Origem', 'Visitas']);
+    expect(linha(19, 2)).toEqual(['instagram', 3]);
+    expect(linha(20, 2)).toEqual(['direto', 1]);
+  });
+
+  it('resumo da semana (pedidos, total, recebido) acompanha os status, sem fórmulas', () => {
+    const { gs, weekSheets } = loadBackend({ tables });
+    gs.createOrder_(base()); // 139,90
+    gs.createOrder_(base({ whatsapp: '21977776666', linhas: [{ tipo: 'prato', uid: 'x', pratoId: 'lasanha', qtd: 2 }] })); // 65,80
+    const week = weekSheets.get('Entrega 2025-06-09')!;
+    const resumo = () => [1, 2, 3].map((r) => [week.value(r, 14), week.value(r, 15)]);
+
+    expect(resumo()).toEqual([['Pedidos', 2], ['Total (sem cancelados)', 205.7], ['Recebido (Pago + Entregue)', 0]]);
+
+    week.cells.set('2,9', 'Pago');
+    week.cells.set('3,9', 'Cancelado');
+    gs.limparCacheDoCardapio(); // gatilho de alteração
+    expect(resumo()).toEqual([['Pedidos', 2], ['Total (sem cancelados)', 139.9], ['Recebido (Pago + Entregue)', 139.9]]);
   });
 
   it('limita 5 pedidos por telefone em 10 minutos', () => {

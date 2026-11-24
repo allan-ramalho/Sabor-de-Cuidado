@@ -75,7 +75,8 @@ A aba **Estatísticas** mostra, por dia, quantas pessoas abriram o site, montara
 - É um contador próprio: sem cookies, sem rastreador de terceiros e sem dados pessoais. Cada etapa conta uma vez por navegador. Quem ativa "Não rastrear" no navegador não é contado.
 - **Origem:** para saber de onde vem cada cliente, use links com a origem no endereço, como `https://allan-ramalho.github.io/Sabor-de-Cuidado/?utm_source=instagram` (na bio do Instagram) e `?utm_source=whatsapp` (no status ou na lista de transmissão). Sem isso, a origem fica como `direto`, pois o WhatsApp não informa de onde a pessoa veio.
 - **Não contar as suas visitas:** no seu celular e no computador, abra uma vez o site com `?sem-contagem=1` no final do endereço. Para voltar a contar, use `?sem-contagem=0`.
-- Os números brutos ficam na aba `Visitas (dados)`. Não edite a aba Estatísticas, que é só fórmulas.
+- Os números brutos ficam na aba `Visitas (dados)`. Não edite a aba Estatísticas: o script a reescreve a cada visita.
+- O script grava os números prontos, e não fórmulas. Fórmulas escritas por script mudam de sintaxe conforme o idioma da planilha e deram erro em planilha em português.
 
 ## Proteção contra pedidos falsos
 
@@ -97,7 +98,7 @@ Ligue os dois lados: com só o segredo no Apps Script, o site não envia a verif
 
 Sempre que o `Code.gs` mudar:
 1. No Apps Script, selecione tudo, apague, cole o novo `Code.gs` e salve.
-2. Escolha a função **atualizarProducao** e clique em **Executar**. Na primeira vez, o Google pede nova autorização (envio de e-mail e acesso a endereços externos). Aceite. Isso também cria a aba Produção.
+2. Escolha a função **atualizarTudo** e clique em **Executar**. Ela recalcula a aba Produção, o resumo de cada semana e a aba Estatísticas. Na primeira vez que o código ganha novos recursos, o Google pede nova autorização (por exemplo, envio de e-mail). Aceite.
 3. **Implantar > Gerenciar implantações > lápis > Nova versão > Implantar.**
 
 ## Imagens dos pratos
