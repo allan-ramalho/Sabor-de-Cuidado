@@ -395,13 +395,10 @@ function createOrder_(body) {
     var entregaISO = deliveryDate_(todayISO_());
     var sheet = getOrCreateWeekSheet_(entregaISO);
 
-    var props = PropertiesService.getScriptProperties();
-    var seqKey = 'seq_' + entregaISO;
-    var numero = parseInt(props.getProperty(seqKey) || '0', 10) + 1;
-    props.setProperty(seqKey, String(numero));
-    var id = 'SC' + entregaISO.slice(2).replace(/-/g, '') + ('00' + numero).slice(-3);
-
-    var row = nextOrderRow_(sheet);
+    var existing = readOrderIds_(sheet);
+    var id = newOrderId_(existing);
+    var row = existing.lastRow + 1;
+    if (row > sheet.getMaxRows()) sheet.insertRowsAfter(sheet.getMaxRows(), 200);
     var formats = ['@', 'dd/MM/yyyy HH:mm', '@', '@', '@', '@', '@', '"R$" #,##0.00', '@', '@', '@', '@'];
     sheet.getRange(row, 1, 1, ORDER_HEADERS.length).setNumberFormats([formats]);
     sheet.getRange(row, 1, 1, ORDER_HEADERS.length).setValues([[
@@ -421,7 +418,6 @@ function createOrder_(body) {
 
     var result = {
       id: id,
-      numero: numero,
       totalCent: priced.totalCent,
       subtotalCent: priced.subtotalCent,
       taxaCent: priced.taxaCent,
@@ -490,19 +486,32 @@ function getOrCreateWeekSheet_(entregaISO) {
 }
 
 /**
- * Próxima linha livre pela coluna A (Pedido). Não usa getLastRow(), pois o resumo
- * da semana (colunas N:O) também conta como conteúdo.
+ * Lê a coluna A (Pedido): devolve os códigos já usados e a última linha preenchida.
+ * Não usa getLastRow(), pois o resumo da semana (colunas N:O) também conta como conteúdo.
  */
-function nextOrderRow_(sheet) {
-  var max = sheet.getMaxRows();
-  var ids = sheet.getRange(1, COL.id, max, 1).getValues();
+function readOrderIds_(sheet) {
+  var values = sheet.getRange(1, COL.id, sheet.getMaxRows(), 1).getValues();
+  var used = {};
   var last = 1;
-  for (var i = ids.length - 1; i >= 1; i--) {
-    if (ids[i][0] !== '') { last = i + 1; break; }
+  for (var i = 1; i < values.length; i++) {
+    if (values[i][0] !== '') { used[String(values[i][0])] = true; last = i + 1; }
   }
-  var row = last + 1;
-  if (row > max) sheet.insertRowsAfter(max, 200);
-  return row;
+  return { used: used, lastRow: last };
+}
+
+/**
+ * Código do pedido mostrado ao cliente, ex.: SC-K7M4QX. É aleatório de propósito:
+ * não revela quantos pedidos a loja recebeu. Sem letras/números parecidos (0/O, 1/I).
+ */
+function newOrderId_(existing) {
+  var alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  for (var attempt = 0; attempt < 20; attempt++) {
+    var code = '';
+    for (var i = 0; i < 6; i++) code += alphabet.charAt(Math.floor(Math.random() * alphabet.length));
+    var id = 'SC-' + code;
+    if (!existing.used[id]) return id;
+  }
+  throw new Error('Não foi possível gerar um código de pedido único');
 }
 
 /** Executada toda quinta pelo gatilho: cria a aba do novo ciclo antes do primeiro pedido. */

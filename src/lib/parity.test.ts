@@ -260,12 +260,15 @@ describe('Code.gs: gravação do pedido', () => {
   it('cria a aba da semana, grava a linha e calcula o total no servidor', () => {
     const { gs, weekSheets } = loadBackend({ tables });
     const r1 = roundtrip(gs.createOrder_(base()));
-    expect(r1).toMatchObject({ id: 'SC250609001', numero: 1, totalCent: 12990 + 1000, entregaISO: '2025-06-09' });
+    expect(r1).toMatchObject({ totalCent: 12990 + 1000, entregaISO: '2025-06-09' });
+    // código aleatório: não revela a contagem de pedidos da loja
+    expect(r1.id).toMatch(/^SC-[A-HJKMNP-Z2-9]{6}$/);
+    expect(r1).not.toHaveProperty('numero');
 
     const sheet = weekSheets.get('Entrega 2025-06-09')!;
     expect(sheet).toBeDefined();
     const row = sheet.rowValues(2);
-    expect(row[0]).toBe('SC250609001');
+    expect(row[0]).toBe(r1.id);
     expect(row[2]).toBe('Maria');
     expect(row[7]).toBeCloseTo(139.9);
     expect(row[8]).toBe('Aguardando comprovante');
@@ -274,8 +277,9 @@ describe('Code.gs: gravação do pedido', () => {
     expect(row[9]).toBe('=HYPERLINK("http://x")');
 
     const r2 = roundtrip(gs.createOrder_(base()));
-    expect(r2.numero).toBe(2);
-    expect(sheet.rowValues(3)[0]).toBe('SC250609002');
+    expect(r2.id).not.toBe(r1.id);
+    expect(r2.id).toMatch(/^SC-[A-HJKMNP-Z2-9]{6}$/);
+    expect(sheet.rowValues(3)[0]).toBe(r2.id);
   });
 
   it('é idempotente por requestId', () => {

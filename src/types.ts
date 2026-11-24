@@ -86,8 +86,8 @@ export interface OrderRequest {
 }
 
 export interface OrderResult {
+  /** Código do pedido mostrado ao cliente (ex.: SC-K7M4QX). Aleatório, sem ordem sequencial. */
   id: string;
-  numero: number;
   totalCent: number;
   subtotalCent: number;
   taxaCent: number;

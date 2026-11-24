@@ -61,7 +61,7 @@ export function PixPayment({ order, whatsapp, avisoEntrega, onMenu, onNewOrder }
           <button className="icon-btn" onClick={onMenu} aria-label="Voltar ao cardápio">
             ‹
           </button>
-          <h2>Pedido nº {result.numero}</h2>
+          <h2>Pedido {result.id}</h2>
         </div>
 
         {result.demo && <p className="notice warn">Modo demonstração: este Pix é de teste, não pague.</p>}
@@ -85,11 +85,11 @@ export function PixPayment({ order, whatsapp, avisoEntrega, onMenu, onNewOrder }
           <h3>Agora é só mais um passo</h3>
           <ol className="steps">
             <li>Pague o Pix no app do seu banco.</li>
-            <li>Toque no botão verde para abrir o WhatsApp.</li>
-            <li>Anexe o comprovante na conversa e envie.</li>
+            <li>Toque no botão verde para abrir o WhatsApp e envie a mensagem do seu pedido.</li>
+            <li>Na mesma conversa, envie o comprovante do Pix (foto ou PDF).</li>
           </ol>
           <a className="btn wa wide" href={whatsappLink(whatsapp, order.mensagemWhatsapp)} target="_blank" rel="noopener noreferrer">
-            Enviar comprovante no WhatsApp
+            Acompanhar meu pedido no WhatsApp
           </a>
           <p className="hint">Seu pedido só é confirmado depois que conferimos o comprovante.</p>
         </section>

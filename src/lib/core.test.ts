@@ -4,6 +4,7 @@ import { brl } from './money';
 import { crc16, buildPix } from './pix';
 import { addDays, deliveryDateFor, toISO, cutoffDateFor } from './cycle';
 import { kitProblem, priceLine, priceOrder, PricingError } from './pricing';
+import { buildWhatsappMessage, whatsappLink } from './whatsapp';
 import type { OrderLine } from '../types';
 
 describe('brl', () => {
@@ -46,6 +47,29 @@ describe('pix', () => {
   it('recusa valor inválido e chave vazia', () => {
     expect(() => buildPix({ chave: '', nome: 'A', cidade: 'B', valorCent: 100, txid: 'X' })).toThrow();
     expect(() => buildPix({ chave: 'a', nome: 'A', cidade: 'B', valorCent: 0, txid: 'X' })).toThrow();
+  });
+});
+
+describe('mensagem do WhatsApp', () => {
+  const lines: OrderLine[] = [
+    { tipo: 'kit', uid: 'a', kitId: 'kit-5', pratos: { 'carne-de-panela': 3, 'lasanha-a-bolonhesa': 2 } },
+  ];
+  const order = priceOrder(demoMenu, lines, 'entrega');
+  const result = { id: 'SC-K7M4QX', totalCent: order.totalCent, subtotalCent: order.subtotalCent, taxaCent: 0, entregaISO: '2025-06-09' };
+  const msg = buildWhatsappMessage({ nome: 'Maria', modo: 'entrega', result, order });
+
+  it('começa com "Acompanhar meu pedido!", usa o código do pedido e não diz que é o comprovante', () => {
+    expect(msg.startsWith('*Acompanhar meu pedido!*')).toBe(true);
+    expect(msg).toContain('*Pedido:* SC-K7M4QX');
+    expect(msg).toContain('*Total:* R$ 139,90');
+    expect(msg).not.toMatch(/comprovante/i);
+    expect(msg).not.toMatch(/nº/);
+  });
+
+  it('o link leva ao número da loja com o texto codificado', () => {
+    const link = whatsappLink('5521979183105', msg);
+    expect(link.startsWith('https://wa.me/5521979183105?text=')).toBe(true);
+    expect(decodeURIComponent(link.split('text=')[1])).toBe(msg);
   });
 });
 

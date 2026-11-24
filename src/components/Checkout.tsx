@@ -248,7 +248,7 @@ export function Checkout({ menu, lines, onBack, onDone }: Props) {
           )}
 
           <button className="btn wide" type="submit" disabled={busy || !summary || !pixReady}>
-            {busy ? 'Registrando pedido...' : `Gerar Pix${summary ? ` · ${brl(summary.totalCent)}` : ''}`}
+            {busy ? 'Registrando pedido...' : `Acompanhar Pedido${summary ? ` · ${brl(summary.totalCent)}` : ''}`}
           </button>
           <p className="hint center">Você paga pelo app do seu banco e envia o comprovante pelo WhatsApp.</p>
         </form>

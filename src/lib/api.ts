@@ -41,10 +41,10 @@ export async function submitOrder(menu: Menu, req: OrderRequest): Promise<OrderR
     await new Promise((r) => setTimeout(r, 600));
     const priced = priceOrder(menu, req.linhas, req.modo);
     const entregaISO = toISO(currentCycle().delivery);
-    const numero = Math.floor(Math.random() * 900) + 100;
+    const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+    const code = Array.from({ length: 6 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
     return {
-      id: `SC${entregaISO.slice(2).replace(/-/g, '')}${numero}`,
-      numero,
+      id: `SC-${code}`,
       totalCent: priced.totalCent,
       subtotalCent: priced.subtotalCent,
       taxaCent: priced.taxaCent,

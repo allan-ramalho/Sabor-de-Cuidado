@@ -121,7 +121,7 @@ export function MenuView({ menu, lines, dispatch, go, pending, offline, demo }: 
       {pending && (
         <button className="pending-banner" onClick={() => go({ name: 'pix' })}>
           <span>
-            Pedido nº {pending.result.numero} aguardando comprovante
+            Pedido {pending.result.id} aguardando comprovante
             <small>Toque para ver o Pix e enviar o comprovante</small>
           </span>
           <b>Ver Pix ›</b>
