@@ -231,6 +231,23 @@ describe('Code.gs: leitura do cardápio da planilha', () => {
   });
 });
 
+describe('Code.gs: atualização do cardápio', () => {
+  const config = (preco: number) => [['Chave', 'Valor', ''], ['preco_avulsa', preco, '']];
+
+  it('usa cache, e o gatilho de alteração faz a mudança aparecer na hora', () => {
+    const tables: Record<string, unknown[][]> = { Config: config(27.9) };
+    const { gs } = loadBackend({ tables });
+
+    expect(roundtrip(gs.getMenu_()).precoAvulsaCent).toBe(2790);
+
+    tables.Config = config(29.9); // dona edita o preço na planilha
+    expect(roundtrip(gs.getMenu_()).precoAvulsaCent).toBe(2790); // ainda no cache
+
+    gs.limparCacheDoCardapio(); // gatilho onChange da planilha
+    expect(roundtrip(gs.getMenu_()).precoAvulsaCent).toBe(2990);
+  });
+});
+
 describe('Code.gs: gravação do pedido', () => {
   const tables = {
     Config: [

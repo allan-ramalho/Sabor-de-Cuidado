@@ -538,6 +538,14 @@ function newOrderId_(existing) {
   throw new Error('Não foi possível gerar um código de pedido único');
 }
 
+/**
+ * Gatilho de alteração da planilha: descarta o cache do cardápio para que mudanças em
+ * preços, pratos e kits apareçam no site na hora (sem esperar o cache expirar).
+ */
+function limparCacheDoCardapio() {
+  CacheService.getScriptCache().remove('menu');
+}
+
 /** Executada toda quinta pelo gatilho: cria a aba do novo ciclo antes do primeiro pedido. */
 function criarAbaDaSemana() {
   var lock = LockService.getScriptLock();
@@ -628,6 +636,7 @@ function configurarPlanilha() {
 
   criarAbaDaSemana();
   instalarGatilho_();
+  instalarAtualizacaoInstantanea();
   CacheService.getScriptCache().remove('menu');
   SpreadsheetApp.flush();
   console.log('Planilha configurada. Preencha pix_chave na aba Config e publique o Web App.');
@@ -650,4 +659,18 @@ function instalarGatilho_() {
   if (exists) return;
   ScriptApp.newTrigger('criarAbaDaSemana')
     .timeBased().onWeekDay(ScriptApp.WeekDay.THURSDAY).atHour(0).inTimezone(TZ).create();
+}
+
+/**
+ * Rodar UMA vez em planilhas já configuradas (escolha esta função e clique em Executar).
+ * Liga a atualização instantânea do cardápio. Pode rodar de novo sem duplicar o gatilho.
+ */
+function instalarAtualizacaoInstantanea() {
+  var exists = ScriptApp.getProjectTriggers().some(function (t) {
+    return t.getHandlerFunction() === 'limparCacheDoCardapio';
+  });
+  if (!exists) {
+    ScriptApp.newTrigger('limparCacheDoCardapio').forSpreadsheet(SpreadsheetApp.getActive()).onChange().create();
+  }
+  CacheService.getScriptCache().remove('menu');
 }
