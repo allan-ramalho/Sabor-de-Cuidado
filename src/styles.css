@@ -169,7 +169,7 @@ button:disabled {
 }
 
 .card .notice {
-  margin: 12px 0 0;
+  margin: 12px 0;
 }
 
 .page-inner > .notice {
@@ -297,10 +297,12 @@ button:disabled {
 }
 
 .row-photo {
-  width: 72px;
-  height: 72px;
-  border-radius: 12px;
+  flex: none;
+  width: 84px;
+  height: 84px;
+  border-radius: 14px;
   object-fit: cover;
+  background: #f1ebdf;
 }
 
 .row-action {

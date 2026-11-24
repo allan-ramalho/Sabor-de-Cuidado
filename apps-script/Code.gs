@@ -529,9 +529,9 @@ function configurarPlanilha() {
     ['pix_nome', 'Sabor de Cuidado', 'Nome do recebedor que aparece no Pix (até 25 letras, sem acento)'],
     ['pix_cidade', 'Rio de Janeiro', 'Cidade do recebedor (até 15 letras)'],
     ['preco_avulsa', 27.9, 'Preço da marmita avulsa, em reais'],
-    ['taxa_entrega', 0, 'Taxa de entrega em reais (0 = sem taxa). Somada ao total quando o cliente escolhe entrega'],
+    ['taxa_entrega', 0, 'Taxa fixa em reais somada ao Pix quando o cliente escolhe entrega. Deixe 0: o Uber é combinado direto com o cliente na hora da entrega'],
     ['retirada', 'SIM', 'SIM permite retirada; NÃO deixa só entrega'],
-    ['aviso_entrega', 'Atendemos algumas regiões. Confirmamos sua entrega pelo WhatsApp.', 'Aviso mostrado na tela de entrega'],
+    ['aviso_entrega', 'A entrega é feita por Uber. O valor da corrida é combinado com você no dia da entrega.', 'Aviso mostrado ao cliente na sacola, no checkout e no Pix'],
     ['pedidos_abertos', 'SIM', 'NÃO pausa os pedidos no site']
   ]);
   var cfg = ss.getSheetByName(TAB_CONFIG);

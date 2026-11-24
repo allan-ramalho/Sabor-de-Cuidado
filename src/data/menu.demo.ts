@@ -11,7 +11,7 @@ export const demoMenu: Menu = {
     pixCidade: 'Rio de Janeiro',
     taxaEntregaCent: 0,
     retirada: true,
-    avisoEntrega: 'Combinamos a taxa de entrega pelo WhatsApp, de acordo com o seu bairro.',
+    avisoEntrega: 'A entrega é feita por Uber. O valor da corrida é combinado com você no dia da entrega.',
     pedidosAbertos: true,
   },
   precoAvulsaCent: 2790,

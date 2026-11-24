@@ -193,6 +193,7 @@ export function MenuView({ menu, lines, dispatch, go, pending, offline, demo }: 
                   dish={{ id: s.id, categoria: '', nome: s.nome, descricao: s.descricao, adicionalCent: 0, foto: s.foto }}
                   price={s.precoCent}
                   qty={qtyOf(lines, 'sobremesa', s.id)}
+                  fallbackFoto="bolo-de-pote.svg"
                   disabled={closed}
                   onChange={(qtd) => dispatch({ type: 'setQty', tipo: 'sobremesa', id: s.id, qtd })}
                 />
@@ -247,8 +248,35 @@ function KitCard({ kit, menu, onPick, disabled }: { kit: Kit; menu: Menu; onPick
   );
 }
 
-function DishRow(props: { dish: Dish; price: number; qty: number; disabled: boolean; onChange: (q: number) => void }) {
-  const { dish, price, qty, disabled, onChange } = props;
+/**
+ * Foto do item: usa a coluna "Foto" da planilha; se vazia, procura public/fotos/<id>.svg.
+ * Se o arquivo não existir, a imagem simplesmente não aparece.
+ */
+function Photo({ foto, fallback }: { foto?: string; fallback: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return null;
+  return (
+    <img
+      className="row-photo"
+      src={foto ? photoUrl(foto) : `./fotos/${fallback}`}
+      alt=""
+      width={84}
+      height={84}
+      loading="lazy"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+function DishRow(props: {
+  dish: Dish;
+  price: number;
+  qty: number;
+  disabled: boolean;
+  onChange: (q: number) => void;
+  fallbackFoto?: string;
+}) {
+  const { dish, price, qty, disabled, onChange, fallbackFoto } = props;
   return (
     <li className="row">
       <div className="row-main">
@@ -256,7 +284,8 @@ function DishRow(props: { dish: Dish; price: number; qty: number; disabled: bool
         {dish.descricao && <p className="muted">{dish.descricao}</p>}
         <p className="row-price">{brl(price)}</p>
       </div>
-      {dish.foto && <img className="row-photo" src={photoUrl(dish.foto)} alt="" loading="lazy" />}
+      <Photo foto={dish.foto} fallback={fallbackFoto ?? `${dish.id}.svg`} />
+
       <div className="row-action">
         {qty > 0 ? (
           <Stepper value={qty} onChange={onChange} label={dish.nome} />

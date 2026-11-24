@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" role="img" aria-label="Bolo de pote">
+<rect width="240" height="240" rx="30" fill="#f6eedd"/>
+<ellipse cx="120" cy="216" rx="88" ry="9" fill="#1f4030" opacity=".1"/>
+<clipPath id="jar"><rect x="66" y="74" width="108" height="124" rx="18"/></clipPath>
+<rect x="66" y="74" width="108" height="124" rx="18" fill="#fffdf8" stroke="#d8cdb4" stroke-width="3"/>
+<g clip-path="url(#jar)">
+  <rect x="66" y="162" width="108" height="40" fill="#74412a"/>
+  <rect x="66" y="144" width="108" height="20" fill="#fbf0dc"/>
+  <rect x="66" y="124" width="108" height="22" fill="#8a5233"/>
+  <rect x="66" y="106" width="108" height="20" fill="#fbf0dc"/>
+  <path d="M66 106q14 12 27 0t27 0t27 0t27 0V96H66z" fill="#fbf0dc"/>
+  <rect x="72" y="74" width="9" height="124" rx="4" fill="#fff" opacity=".35"/>
+</g>
+<circle cx="120" cy="86" r="14" fill="#d1304a"/>
+<path d="M112 76q8-8 16 0q-8 4-16 0z" fill="#3f8a3e"/>
+<circle cx="115" cy="85" r="1.4" fill="#f5b3bd"/><circle cx="124" cy="88" r="1.4" fill="#f5b3bd"/><circle cx="120" cy="92" r="1.4" fill="#f5b3bd"/>
+<rect x="60" y="62" width="120" height="16" rx="7" fill="#b4451b"/>
+<path d="M120 76C113 71 114 66.5 117 66.5C118.5 66.5 120 67.7 120 68.7C120 67.7 121.5 66.5 123 66.5C126 66.5 127 71 120 76Z" fill="#f6eedd" transform="translate(0 2)"/>
+<g stroke="#7fb7d9" stroke-width="2.6" stroke-linecap="round"><path d="M208 12v20M199.3 17l17.4 10M199.3 27l17.4-10"/></g>
+</svg>

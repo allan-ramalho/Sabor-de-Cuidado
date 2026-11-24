@@ -8,6 +8,8 @@ import { whatsappLink } from '../lib/whatsapp';
 interface Props {
   order: PendingOrder;
   whatsapp: string;
+  /** Texto da loja sobre a entrega (ex.: Uber combinado na hora). */
+  avisoEntrega: string;
   onMenu: () => void;
   onNewOrder: () => void;
 }
@@ -30,7 +32,7 @@ async function copyText(text: string): Promise<boolean> {
   }
 }
 
-export function PixPayment({ order, whatsapp, onMenu, onNewOrder }: Props) {
+export function PixPayment({ order, whatsapp, avisoEntrega, onMenu, onNewOrder }: Props) {
   const [qr, setQr] = useState('');
   const [copied, setCopied] = useState(false);
   const { result } = order;
@@ -69,6 +71,9 @@ export function PixPayment({ order, whatsapp, onMenu, onNewOrder }: Props) {
             {order.modo === 'entrega' ? 'Entrega' : 'Retirada'} na {shortLabel(fromISO(result.entregaISO))}
           </p>
           <p className="pix-total">{brl(result.totalCent)}</p>
+          {order.modo === 'entrega' && result.taxaCent === 0 && avisoEntrega && (
+            <p className="notice">Este valor não inclui a entrega. {avisoEntrega}</p>
+          )}
           {qr ? <img className="qr" src={qr} alt="QR Code do Pix" width={260} height={260} /> : <div className="qr skeleton" />}
           <button className="btn wide" onClick={copy}>
             {copied ? 'Código copiado!' : 'Copiar código Pix'}

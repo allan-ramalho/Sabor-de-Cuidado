@@ -36,7 +36,11 @@ export function CartSheet({ menu, lines, dispatch, go, onClose }: Props) {
               <span>Subtotal</span>
               <b>{brl(subtotal)}</b>
             </div>
-            <p className="hint">A taxa de entrega, se houver, aparece no próximo passo.</p>
+            <p className="hint">
+              {menu.loja.taxaEntregaCent > 0
+                ? 'A taxa de entrega é somada no próximo passo.'
+                : menu.loja.avisoEntrega || 'Confira a entrega no próximo passo.'}
+            </p>
             <button className="btn wide" onClick={() => go({ name: 'checkout' })} disabled={!menu.loja.pedidosAbertos}>
               Continuar
             </button>

@@ -224,10 +224,10 @@ export function Checkout({ menu, lines, onBack, onDone }: Props) {
                   <span>Subtotal</span>
                   <span>{brl(summary.subtotalCent)}</span>
                 </div>
-                {summary.taxaCent > 0 && (
+                {modo === 'entrega' && (
                   <div className="sum small">
-                    <span>Taxa de entrega</span>
-                    <span>{brl(summary.taxaCent)}</span>
+                    <span>Entrega</span>
+                    <span>{summary.taxaCent > 0 ? brl(summary.taxaCent) : 'A combinar na entrega'}</span>
                   </div>
                 )}
                 <div className="sum">

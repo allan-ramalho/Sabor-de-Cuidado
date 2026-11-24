@@ -114,6 +114,7 @@ export default function App() {
         <PixPayment
           order={pending}
           whatsapp={menu.loja.whatsapp}
+          avisoEntrega={menu.loja.avisoEntrega}
           onMenu={() => go({ name: 'menu' }, { replace: true })}
           onNewOrder={onNewOrder}
         />

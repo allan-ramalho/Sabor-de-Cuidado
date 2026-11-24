@@ -11,9 +11,9 @@ São três etapas: planilha com backend, site no GitHub Pages e conferência fin
 5. Selecione a função **configurarPlanilha** na barra superior e clique em **Executar**. O Google pede autorização (planilhas e gatilhos). Em "O Google não verificou este app", use **Avançado > Acessar (não seguro)**. O script é seu e roda só na sua conta.
 6. Volte à planilha. Ela terá as abas `Config`, `Cardápio`, `Kits`, `Sobremesas` e a primeira aba de entrega (`Entrega AAAA-MM-DD`).
 7. Na aba **Config**, preencha:
-   - `pix_chave`: **obrigatório**. Sem ela o site não gera pedidos. Celular precisa do formato `+5521999999999`.
+   - `pix_chave`: **obrigatório**, cole o e-mail da chave Pix. Sem ela o site não gera pedidos. A chave fica só na planilha, não no repositório.
    - `pix_nome` e `pix_cidade`: aparecem no app do banco do cliente.
-   - `taxa_entrega` e `aviso_entrega`, se houver.
+   - `taxa_entrega`: deixe **0**. A entrega é por Uber e o valor é combinado com o cliente no dia, então o Pix cobre só os produtos. O texto de `aviso_entrega` explica isso ao cliente na sacola, no checkout e na tela do Pix.
 8. Na aba **Sobremesas**, troque pelos sabores reais, o preço, e mude `Ativo` para **SIM**.
 9. Publique: **Implantar > Nova implantação > tipo "App da Web"**.
    - Executar como: **Eu**
@@ -52,9 +52,13 @@ Teste rápido: abra `URL?action=menu` no navegador. Deve aparecer um JSON com o 
 
 **Ciclo semanal:** pedidos de quinta 00:00 a quarta 23:59 entram na aba da segunda seguinte. Toda quinta de madrugada o gatilho cria a aba do novo ciclo. Se o gatilho falhar, a aba é criada no primeiro pedido.
 
-## Fotos dos pratos (opcional)
+## Imagens dos pratos
 
-Coloque os arquivos em `public/fotos/` e escreva o nome do arquivo (ex.: `lasanha.jpg`) na coluna `Foto` do cardápio. Também aceita link `https://`.
+Os pratos do cardápio já têm uma ilustração em `public/fotos/`, com o nome do prato em minúsculas, sem acento e com hífens (`carne-de-panela.svg`). O site usa esse arquivo automaticamente, sem preencher nada na planilha. Os bolos de pote usam `bolo-de-pote.svg`.
+
+- **Prato novo:** crie `public/fotos/<nome-do-prato>.jpg` (ou `.svg`) e escreva o nome do arquivo na coluna `Foto` do cardápio. Também aceita link `https://`. Sem imagem, o prato aparece só com texto.
+- **Trocar por foto real:** salve a foto em `public/fotos/` e coloque o nome do arquivo na coluna `Foto`. Fotos quadradas, de uns 400x400 px e menores que 100 KB, carregam rápido no celular.
+- **Regerar as ilustrações:** `node scripts/gerar-fotos.mjs`.
 
 ## Logo
 
